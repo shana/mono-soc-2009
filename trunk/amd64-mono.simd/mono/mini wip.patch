@@ -1,0 +1,605 @@
+Index: mono/mini/mini-amd64.c
+===================================================================
+--- mono/mini/mini-amd64.c	(revision 134687)
++++ mono/mini/mini-amd64.c	(working copy)
+@@ -911,11 +911,54 @@
+ 				*exclude_mask |= MONO_OPT_FCMOV;
+ 		} else
+ 			*exclude_mask |= MONO_OPT_CMOV;
++
++		if (edx & (1 << 26))
++			opts |= MONO_OPT_SSE2;
++		else
++			*exclude_mask |= MONO_OPT_SSE2;
++
++#ifdef MONO_ARCH_SIMD_INTRINSICS_AMD64
++		/*SIMD intrinsics require at least SSE2.*/
++		if (!(opts & MONO_OPT_SSE2))
++			*exclude_mask |= MONO_OPT_SIMD;
++#endif
++
++
+ 	}
+ 
+ 	return opts;
+ }
+ 
++/*
++ * This function test for all SSE functions supported.
++ *
++ * Returns a bitmask corresponding to all supported versions.
++ * 
++ * TODO detect other versions like SSE4a.
++ */
++guint32
++mono_arch_cpu_enumerate_simd_versions (void)
++{
++	int eax, ebx, ecx, edx;
++	guint32 sse_opts = 0;
++
++	if (cpuid (1, &eax, &ebx, &ecx, &edx)) {
++		if (edx & (1 << 25))
++			sse_opts |= 1 << SIMD_VERSION_SSE1;
++		if (edx & (1 << 26))
++			sse_opts |= 1 << SIMD_VERSION_SSE2;
++		if (ecx & (1 << 0))
++			sse_opts |= 1 << SIMD_VERSION_SSE3;
++		if (ecx & (1 << 9))
++			sse_opts |= 1 << SIMD_VERSION_SSSE3;
++		if (ecx & (1 << 19))
++			sse_opts |= 1 << SIMD_VERSION_SSE41;
++		if (ecx & (1 << 20))
++			sse_opts |= 1 << SIMD_VERSION_SSE42;
++	}
++	return sse_opts;	
++}
++
+ GList *
+ mono_arch_get_allocatable_int_vars (MonoCompile *cfg)
+ {
+@@ -4463,6 +4506,545 @@
+ 			MONO_VARINFO (cfg, ins->inst_c0)->live_range_end = code - cfg->native_code;
+ 			break;
+ 		}
++#ifdef MONO_ARCH_SIMD_INTRINSICS_AMD64
++		case OP_ADDPS:
++			x86_sse_alu_ps_reg_reg (code, X86_SSE_ADD, ins->sreg1, ins->sreg2);
++			break;
++		case OP_DIVPS:
++			x86_sse_alu_ps_reg_reg (code, X86_SSE_DIV, ins->sreg1, ins->sreg2);
++			break;
++		case OP_MULPS:
++			x86_sse_alu_ps_reg_reg (code, X86_SSE_MUL, ins->sreg1, ins->sreg2);
++			break;
++		case OP_SUBPS:
++			x86_sse_alu_ps_reg_reg (code, X86_SSE_SUB, ins->sreg1, ins->sreg2);
++			break;
++		case OP_MAXPS:
++			x86_sse_alu_ps_reg_reg (code, X86_SSE_MAX, ins->sreg1, ins->sreg2);
++			break;
++		case OP_MINPS:
++			x86_sse_alu_ps_reg_reg (code, X86_SSE_MIN, ins->sreg1, ins->sreg2);
++			break;
++		case OP_COMPPS:
++			g_assert (ins->inst_c0 >= 0 && ins->inst_c0 <= 7);
++			x86_sse_alu_ps_reg_reg_imm (code, X86_SSE_COMP, ins->sreg1, ins->sreg2, ins->inst_c0);
++			break;
++		case OP_ANDPS:
++			x86_sse_alu_ps_reg_reg (code, X86_SSE_AND, ins->sreg1, ins->sreg2);
++			break;
++		case OP_ANDNPS:
++			x86_sse_alu_ps_reg_reg (code, X86_SSE_ANDN, ins->sreg1, ins->sreg2);
++			break;
++		case OP_ORPS:
++			x86_sse_alu_ps_reg_reg (code, X86_SSE_OR, ins->sreg1, ins->sreg2);
++			break;
++		case OP_XORPS:
++			x86_sse_alu_ps_reg_reg (code, X86_SSE_XOR, ins->sreg1, ins->sreg2);
++			break;
++		case OP_SQRTPS:
++			x86_sse_alu_ps_reg_reg (code, X86_SSE_SQRT, ins->dreg, ins->sreg1);
++			break;
++		case OP_RSQRTPS:
++			x86_sse_alu_ps_reg_reg (code, X86_SSE_RSQRT, ins->dreg, ins->sreg1);
++			break;
++		case OP_RCPPS:
++			x86_sse_alu_ps_reg_reg (code, X86_SSE_RCP, ins->dreg, ins->sreg1);
++			break;
++		case OP_ADDSUBPS:
++			x86_sse_alu_sd_reg_reg (code, X86_SSE_ADDSUB, ins->sreg1, ins->sreg2);
++			break;
++		case OP_HADDPS:
++			x86_sse_alu_sd_reg_reg (code, X86_SSE_HADD, ins->sreg1, ins->sreg2);
++			break;
++		case OP_HSUBPS:
++			x86_sse_alu_sd_reg_reg (code, X86_SSE_HSUB, ins->sreg1, ins->sreg2);
++			break;
++		case OP_DUPPS_HIGH:
++			x86_sse_alu_ss_reg_reg (code, X86_SSE_MOVSHDUP, ins->dreg, ins->sreg1);
++			break;
++		case OP_DUPPS_LOW:
++			x86_sse_alu_ss_reg_reg (code, X86_SSE_MOVSLDUP, ins->dreg, ins->sreg1);
++			break;
++
++		case OP_PSHUFLEW_HIGH:
++			g_assert (ins->inst_c0 >= 0 && ins->inst_c0 <= 0xFF);
++			x86_pshufw_reg_reg (code, ins->dreg, ins->sreg1, ins->inst_c0, 1);
++			break;
++		case OP_PSHUFLEW_LOW:
++			g_assert (ins->inst_c0 >= 0 && ins->inst_c0 <= 0xFF);
++			x86_pshufw_reg_reg (code, ins->dreg, ins->sreg1, ins->inst_c0, 0);
++			break;
++		case OP_PSHUFLED:
++			g_assert (ins->inst_c0 >= 0 && ins->inst_c0 <= 0xFF);
++			x86_sse_shift_reg_imm (code, X86_SSE_PSHUFD, ins->dreg, ins->sreg1, ins->inst_c0);
++			break;
++
++		case OP_ADDPD:
++			x86_sse_alu_pd_reg_reg (code, X86_SSE_ADD, ins->sreg1, ins->sreg2);
++			break;
++		case OP_DIVPD:
++			x86_sse_alu_pd_reg_reg (code, X86_SSE_DIV, ins->sreg1, ins->sreg2);
++			break;
++		case OP_MULPD:
++			x86_sse_alu_pd_reg_reg (code, X86_SSE_MUL, ins->sreg1, ins->sreg2);
++			break;
++		case OP_SUBPD:
++			x86_sse_alu_pd_reg_reg (code, X86_SSE_SUB, ins->sreg1, ins->sreg2);
++			break;
++		case OP_MAXPD:
++			x86_sse_alu_pd_reg_reg (code, X86_SSE_MAX, ins->sreg1, ins->sreg2);
++			break;
++		case OP_MINPD:
++			x86_sse_alu_pd_reg_reg (code, X86_SSE_MIN, ins->sreg1, ins->sreg2);
++			break;
++		case OP_COMPPD:
++			g_assert (ins->inst_c0 >= 0 && ins->inst_c0 <= 7);
++			x86_sse_alu_pd_reg_reg_imm (code, X86_SSE_COMP, ins->sreg1, ins->sreg2, ins->inst_c0);
++			break;
++		case OP_ANDPD:
++			x86_sse_alu_pd_reg_reg (code, X86_SSE_AND, ins->sreg1, ins->sreg2);
++			break;
++		case OP_ANDNPD:
++			x86_sse_alu_pd_reg_reg (code, X86_SSE_ANDN, ins->sreg1, ins->sreg2);
++			break;
++		case OP_ORPD:
++			x86_sse_alu_pd_reg_reg (code, X86_SSE_OR, ins->sreg1, ins->sreg2);
++			break;
++		case OP_XORPD:
++			x86_sse_alu_pd_reg_reg (code, X86_SSE_XOR, ins->sreg1, ins->sreg2);
++			break;
++		case OP_ADDSUBPD:
++			x86_sse_alu_pd_reg_reg (code, X86_SSE_ADDSUB, ins->sreg1, ins->sreg2);
++			break;
++		case OP_HADDPD:
++			x86_sse_alu_pd_reg_reg (code, X86_SSE_HADD, ins->sreg1, ins->sreg2);
++			break;
++		case OP_HSUBPD:
++			x86_sse_alu_pd_reg_reg (code, X86_SSE_HSUB, ins->sreg1, ins->sreg2);
++			break;
++		case OP_DUPPD:
++			x86_sse_alu_sd_reg_reg (code, X86_SSE_MOVDDUP, ins->dreg, ins->sreg1);
++			break;
++			
++		case OP_EXTRACT_MASK:
++			x86_sse_alu_pd_reg_reg (code, X86_SSE_PMOVMSKB, ins->dreg, ins->sreg1);
++			break;
++	
++		case OP_PAND:
++			x86_sse_alu_pd_reg_reg (code, X86_SSE_PAND, ins->sreg1, ins->sreg2);
++			break;
++		case OP_POR:
++			x86_sse_alu_pd_reg_reg (code, X86_SSE_POR, ins->sreg1, ins->sreg2);
++			break;
++		case OP_PXOR:
++			x86_sse_alu_pd_reg_reg (code, X86_SSE_PXOR, ins->sreg1, ins->sreg2);
++			break;
++
++		case OP_PADDB:
++			x86_sse_alu_pd_reg_reg (code, X86_SSE_PADDB, ins->sreg1, ins->sreg2);
++			break;
++		case OP_PADDW:
++			x86_sse_alu_pd_reg_reg (code, X86_SSE_PADDW, ins->sreg1, ins->sreg2);
++			break;
++		case OP_PADDD:
++			x86_sse_alu_pd_reg_reg (code, X86_SSE_PADDD, ins->sreg1, ins->sreg2);
++			break;
++		case OP_PADDQ:
++			x86_sse_alu_pd_reg_reg (code, X86_SSE_PADDQ, ins->sreg1, ins->sreg2);
++			break;
++
++		case OP_PSUBB:
++			x86_sse_alu_pd_reg_reg (code, X86_SSE_PSUBB, ins->sreg1, ins->sreg2);
++			break;
++		case OP_PSUBW:
++			x86_sse_alu_pd_reg_reg (code, X86_SSE_PSUBW, ins->sreg1, ins->sreg2);
++			break;
++		case OP_PSUBD:
++			x86_sse_alu_pd_reg_reg (code, X86_SSE_PSUBD, ins->sreg1, ins->sreg2);
++			break;
++		case OP_PSUBQ:
++			x86_sse_alu_pd_reg_reg (code, X86_SSE_PSUBQ, ins->sreg1, ins->sreg2);
++			break;
++
++		case OP_PMAXB_UN:
++			x86_sse_alu_pd_reg_reg (code, X86_SSE_PMAXUB, ins->sreg1, ins->sreg2);
++			break;
++		case OP_PMAXW_UN:
++			x86_sse_alu_sse41_reg_reg (code, X86_SSE_PMAXUW, ins->sreg1, ins->sreg2);
++			break;
++		case OP_PMAXD_UN:
++			x86_sse_alu_sse41_reg_reg (code, X86_SSE_PMAXUD, ins->sreg1, ins->sreg2);
++			break;
++		
++		case OP_PMAXB:
++			x86_sse_alu_sse41_reg_reg (code, X86_SSE_PMAXSB, ins->sreg1, ins->sreg2);
++			break;
++		case OP_PMAXW:
++			x86_sse_alu_pd_reg_reg (code, X86_SSE_PMAXSW, ins->sreg1, ins->sreg2);
++			break;
++		case OP_PMAXD:
++			x86_sse_alu_sse41_reg_reg (code, X86_SSE_PMAXSD, ins->sreg1, ins->sreg2);
++			break;
++
++		case OP_PAVGB_UN:
++			x86_sse_alu_pd_reg_reg (code, X86_SSE_PAVGB, ins->sreg1, ins->sreg2);
++			break;
++		case OP_PAVGW_UN:
++			x86_sse_alu_pd_reg_reg (code, X86_SSE_PAVGW, ins->sreg1, ins->sreg2);
++			break;
++
++		case OP_PMINB_UN:
++			x86_sse_alu_pd_reg_reg (code, X86_SSE_PMINUB, ins->sreg1, ins->sreg2);
++			break;
++		case OP_PMINW_UN:
++			x86_sse_alu_sse41_reg_reg (code, X86_SSE_PMINUW, ins->sreg1, ins->sreg2);
++			break;
++		case OP_PMIND_UN:
++			x86_sse_alu_sse41_reg_reg (code, X86_SSE_PMINUD, ins->sreg1, ins->sreg2);
++			break;
++
++		case OP_PMINB:
++			x86_sse_alu_sse41_reg_reg (code, X86_SSE_PMINSB, ins->sreg1, ins->sreg2);
++			break;
++		case OP_PMINW:
++			x86_sse_alu_pd_reg_reg (code, X86_SSE_PMINSW, ins->sreg1, ins->sreg2);
++			break;
++		case OP_PMIND:
++			x86_sse_alu_sse41_reg_reg (code, X86_SSE_PMINSD, ins->sreg1, ins->sreg2);
++			break;
++
++		case OP_PCMPEQB:
++			x86_sse_alu_pd_reg_reg (code, X86_SSE_PCMPEQB, ins->sreg1, ins->sreg2);
++			break;
++		case OP_PCMPEQW:
++			x86_sse_alu_pd_reg_reg (code, X86_SSE_PCMPEQW, ins->sreg1, ins->sreg2);
++			break;
++		case OP_PCMPEQD:
++			x86_sse_alu_pd_reg_reg (code, X86_SSE_PCMPEQD, ins->sreg1, ins->sreg2);
++			break;
++		case OP_PCMPEQQ:
++			x86_sse_alu_sse41_reg_reg (code, X86_SSE_PCMPEQQ, ins->sreg1, ins->sreg2);
++			break;
++
++		case OP_PCMPGTB:
++			x86_sse_alu_pd_reg_reg (code, X86_SSE_PCMPGTB, ins->sreg1, ins->sreg2);
++			break;
++		case OP_PCMPGTW:
++			x86_sse_alu_pd_reg_reg (code, X86_SSE_PCMPGTW, ins->sreg1, ins->sreg2);
++			break;
++		case OP_PCMPGTD:
++			x86_sse_alu_pd_reg_reg (code, X86_SSE_PCMPGTD, ins->sreg1, ins->sreg2);
++			break;
++		case OP_PCMPGTQ:
++			x86_sse_alu_sse41_reg_reg (code, X86_SSE_PCMPGTQ, ins->sreg1, ins->sreg2);
++			break;
++
++		case OP_PSUM_ABS_DIFF:
++			x86_sse_alu_pd_reg_reg (code, X86_SSE_PSADBW, ins->sreg1, ins->sreg2);
++			break;
++
++		case OP_UNPACK_LOWB:
++			x86_sse_alu_pd_reg_reg (code, X86_SSE_PUNPCKLBW, ins->sreg1, ins->sreg2);
++			break;
++		case OP_UNPACK_LOWW:
++			x86_sse_alu_pd_reg_reg (code, X86_SSE_PUNPCKLWD, ins->sreg1, ins->sreg2);
++			break;
++		case OP_UNPACK_LOWD:
++			x86_sse_alu_pd_reg_reg (code, X86_SSE_PUNPCKLDQ, ins->sreg1, ins->sreg2);
++			break;
++		case OP_UNPACK_LOWQ:
++			x86_sse_alu_pd_reg_reg (code, X86_SSE_PUNPCKLQDQ, ins->sreg1, ins->sreg2);
++			break;
++		case OP_UNPACK_LOWPS:
++			x86_sse_alu_ps_reg_reg (code, X86_SSE_UNPCKL, ins->sreg1, ins->sreg2);
++			break;
++		case OP_UNPACK_LOWPD:
++			x86_sse_alu_pd_reg_reg (code, X86_SSE_UNPCKL, ins->sreg1, ins->sreg2);
++			break;
++
++		case OP_UNPACK_HIGHB:
++			x86_sse_alu_pd_reg_reg (code, X86_SSE_PUNPCKHBW, ins->sreg1, ins->sreg2);
++			break;
++		case OP_UNPACK_HIGHW:
++			x86_sse_alu_pd_reg_reg (code, X86_SSE_PUNPCKHWD, ins->sreg1, ins->sreg2);
++			break;
++		case OP_UNPACK_HIGHD:
++			x86_sse_alu_pd_reg_reg (code, X86_SSE_PUNPCKHDQ, ins->sreg1, ins->sreg2);
++			break;
++		case OP_UNPACK_HIGHQ:
++			x86_sse_alu_pd_reg_reg (code, X86_SSE_PUNPCKHQDQ, ins->sreg1, ins->sreg2);
++			break;
++		case OP_UNPACK_HIGHPS:
++			x86_sse_alu_ps_reg_reg (code, X86_SSE_UNPCKH, ins->sreg1, ins->sreg2);
++			break;
++		case OP_UNPACK_HIGHPD:
++			x86_sse_alu_pd_reg_reg (code, X86_SSE_UNPCKH, ins->sreg1, ins->sreg2);
++			break;
++
++		case OP_PACKW:
++			x86_sse_alu_pd_reg_reg (code, X86_SSE_PACKSSWB, ins->sreg1, ins->sreg2);
++			break;
++		case OP_PACKD:
++			x86_sse_alu_pd_reg_reg (code, X86_SSE_PACKSSDW, ins->sreg1, ins->sreg2);
++			break;
++		case OP_PACKW_UN:
++			x86_sse_alu_pd_reg_reg (code, X86_SSE_PACKUSWB, ins->sreg1, ins->sreg2);
++			break;
++		case OP_PACKD_UN:
++			x86_sse_alu_sse41_reg_reg (code, X86_SSE_PACKUSDW, ins->sreg1, ins->sreg2);
++			break;
++
++		case OP_PADDB_SAT_UN:
++			x86_sse_alu_pd_reg_reg (code, X86_SSE_PADDUSB, ins->sreg1, ins->sreg2);
++			break;
++		case OP_PSUBB_SAT_UN:
++			x86_sse_alu_pd_reg_reg (code, X86_SSE_PSUBUSB, ins->sreg1, ins->sreg2);
++			break;
++		case OP_PADDW_SAT_UN:
++			x86_sse_alu_pd_reg_reg (code, X86_SSE_PADDUSW, ins->sreg1, ins->sreg2);
++			break;
++		case OP_PSUBW_SAT_UN:
++			x86_sse_alu_pd_reg_reg (code, X86_SSE_PSUBUSW, ins->sreg1, ins->sreg2);
++			break;
++
++		case OP_PADDB_SAT:
++			x86_sse_alu_pd_reg_reg (code, X86_SSE_PADDSB, ins->sreg1, ins->sreg2);
++			break;
++		case OP_PSUBB_SAT:
++			x86_sse_alu_pd_reg_reg (code, X86_SSE_PSUBSB, ins->sreg1, ins->sreg2);
++			break;
++		case OP_PADDW_SAT:
++			x86_sse_alu_pd_reg_reg (code, X86_SSE_PADDSW, ins->sreg1, ins->sreg2);
++			break;
++		case OP_PSUBW_SAT:
++			x86_sse_alu_pd_reg_reg (code, X86_SSE_PSUBSW, ins->sreg1, ins->sreg2);
++			break;
++			
++		case OP_PMULW:
++			x86_sse_alu_pd_reg_reg (code, X86_SSE_PMULLW, ins->sreg1, ins->sreg2);
++			break;
++		case OP_PMULD:
++			x86_sse_alu_sse41_reg_reg (code, X86_SSE_PMULLD, ins->sreg1, ins->sreg2);
++			break;
++		case OP_PMULQ:
++			x86_sse_alu_pd_reg_reg (code, X86_SSE_PMULUDQ, ins->sreg1, ins->sreg2);
++			break;
++		case OP_PMULW_HIGH_UN:
++			x86_sse_alu_pd_reg_reg (code, X86_SSE_PMULHUW, ins->sreg1, ins->sreg2);
++			break;
++		case OP_PMULW_HIGH:
++			x86_sse_alu_pd_reg_reg (code, X86_SSE_PMULHW, ins->sreg1, ins->sreg2);
++			break;
++
++		case OP_PSHRW:
++			x86_sse_shift_reg_imm (code, X86_SSE_PSHIFTW, X86_SSE_SHR, ins->dreg, ins->inst_imm);
++			break;
++		case OP_PSHRW_REG:
++			x86_sse_shift_reg_reg (code, X86_SSE_PSRLW_REG, ins->dreg, ins->sreg2);
++			break;
++
++		case OP_PSARW:
++			x86_sse_shift_reg_imm (code, X86_SSE_PSHIFTW, X86_SSE_SAR, ins->dreg, ins->inst_imm);
++			break;
++		case OP_PSARW_REG:
++			x86_sse_shift_reg_reg (code, X86_SSE_PSRAW_REG, ins->dreg, ins->sreg2);
++			break;
++
++		case OP_PSHLW:
++			x86_sse_shift_reg_imm (code, X86_SSE_PSHIFTW, X86_SSE_SHL, ins->dreg, ins->inst_imm);
++			break;
++		case OP_PSHLW_REG:
++			x86_sse_shift_reg_reg (code, X86_SSE_PSLLW_REG, ins->dreg, ins->sreg2);
++			break;
++
++		case OP_PSHRD:
++			x86_sse_shift_reg_imm (code, X86_SSE_PSHIFTD, X86_SSE_SHR, ins->dreg, ins->inst_imm);
++			break;
++		case OP_PSHRD_REG:
++			x86_sse_shift_reg_reg (code, X86_SSE_PSRLD_REG, ins->dreg, ins->sreg2);
++			break;
++
++		case OP_PSARD:
++			x86_sse_shift_reg_imm (code, X86_SSE_PSHIFTD, X86_SSE_SAR, ins->dreg, ins->inst_imm);
++			break;
++		case OP_PSARD_REG:
++			x86_sse_shift_reg_reg (code, X86_SSE_PSRAD_REG, ins->dreg, ins->sreg2);
++			break;
++
++		case OP_PSHLD:
++			x86_sse_shift_reg_imm (code, X86_SSE_PSHIFTD, X86_SSE_SHL, ins->dreg, ins->inst_imm);
++			break;
++		case OP_PSHLD_REG:
++			x86_sse_shift_reg_reg (code, X86_SSE_PSLLD_REG, ins->dreg, ins->sreg2);
++			break;
++
++		case OP_PSHRQ:
++			x86_sse_shift_reg_imm (code, X86_SSE_PSHIFTQ, X86_SSE_SHR, ins->dreg, ins->inst_imm);
++			break;
++		case OP_PSHRQ_REG:
++			x86_sse_shift_reg_reg (code, X86_SSE_PSRLQ_REG, ins->dreg, ins->sreg2);
++			break;
++
++		case OP_PSHLQ:
++			x86_sse_shift_reg_imm (code, X86_SSE_PSHIFTQ, X86_SSE_SHL, ins->dreg, ins->inst_imm);
++			break;
++		case OP_PSHLQ_REG:
++			x86_sse_shift_reg_reg (code, X86_SSE_PSLLQ_REG, ins->dreg, ins->sreg2);
++			break;		
++			
++		case OP_ICONV_TO_X:
++			x86_movd_xreg_reg (code, ins->dreg, ins->sreg1);
++			break;
++		case OP_EXTRACT_I4:
++			x86_movd_reg_xreg (code, ins->dreg, ins->sreg1);
++			break;
++		case OP_EXTRACT_I1:
++		case OP_EXTRACT_U1:
++			x86_movd_reg_xreg (code, ins->dreg, ins->sreg1);
++			if (ins->inst_c0)
++				x86_shift_reg_imm (code, X86_SHR, ins->dreg, ins->inst_c0 * 8);
++			x86_widen_reg (code, ins->dreg, ins->dreg, ins->opcode == OP_EXTRACT_I1, FALSE);
++			break;
++		case OP_EXTRACT_I2:
++		case OP_EXTRACT_U2:
++			x86_movd_reg_xreg (code, ins->dreg, ins->sreg1);
++			if (ins->inst_c0)
++				x86_shift_reg_imm (code, X86_SHR, ins->dreg, 16);
++			x86_widen_reg (code, ins->dreg, ins->dreg, ins->opcode == OP_EXTRACT_I2, TRUE);
++			break;
++		case OP_EXTRACT_R8:
++			if (ins->inst_c0)
++				x86_sse_alu_pd_membase_reg (code, X86_SSE_MOVHPD_MEMBASE_REG, ins->backend.spill_var->inst_basereg, ins->backend.spill_var->inst_offset, ins->sreg1);
++			else
++				x86_sse_alu_sd_membase_reg (code, X86_SSE_MOVSD_MEMBASE_REG, ins->backend.spill_var->inst_basereg, ins->backend.spill_var->inst_offset, ins->sreg1);
++			x86_fld_membase (code, ins->backend.spill_var->inst_basereg, ins->backend.spill_var->inst_offset, TRUE);
++			break;
++
++		case OP_INSERT_I2:
++			x86_sse_alu_pd_reg_reg_imm (code, X86_SSE_PINSRW, ins->sreg1, ins->sreg2, ins->inst_c0);
++			break;
++		case OP_EXTRACTX_U2:
++			x86_sse_alu_pd_reg_reg_imm (code, X86_SSE_PEXTRW, ins->dreg, ins->sreg1, ins->inst_c0);
++			break;
++		case OP_INSERTX_U1_SLOW:
++			/*sreg1 is the extracted ireg (scratch)
++			/sreg2 is the to be inserted ireg (scratch)
++			/dreg is the xreg to receive the value*/
++
++			/*clear the bits from the extracted word*/
++			x86_alu_reg_imm (code, X86_AND, ins->sreg1, ins->inst_c0 & 1 ? 0x00FF : 0xFF00);
++			/*shift the value to insert if needed*/
++			if (ins->inst_c0 & 1)
++				x86_shift_reg_imm (code, X86_SHL, ins->sreg2, 8);
++			/*join them together*/
++			x86_alu_reg_reg (code, X86_OR, ins->sreg1, ins->sreg2);
++			x86_sse_alu_pd_reg_reg_imm (code, X86_SSE_PINSRW, ins->dreg, ins->sreg1, ins->inst_c0 / 2);
++			break;
++		case OP_INSERTX_I4_SLOW:
++			x86_sse_alu_pd_reg_reg_imm (code, X86_SSE_PINSRW, ins->dreg, ins->sreg2, ins->inst_c0 * 2);
++			x86_shift_reg_imm (code, X86_SHR, ins->sreg2, 16);
++			x86_sse_alu_pd_reg_reg_imm (code, X86_SSE_PINSRW, ins->dreg, ins->sreg2, ins->inst_c0 * 2 + 1);
++			break;
++
++		case OP_INSERTX_R4_SLOW:
++			x86_fst_membase (code, ins->backend.spill_var->inst_basereg, ins->backend.spill_var->inst_offset, FALSE, TRUE);
++			/*TODO if inst_c0 == 0 use movss*/
++			x86_sse_alu_pd_reg_membase_imm (code, X86_SSE_PINSRW, ins->dreg, ins->backend.spill_var->inst_basereg, ins->backend.spill_var->inst_offset + 0, ins->inst_c0 * 2);
++			x86_sse_alu_pd_reg_membase_imm (code, X86_SSE_PINSRW, ins->dreg, ins->backend.spill_var->inst_basereg, ins->backend.spill_var->inst_offset + 2, ins->inst_c0 * 2 + 1);
++			break;
++		case OP_INSERTX_R8_SLOW:
++			x86_fst_membase (code, ins->backend.spill_var->inst_basereg, ins->backend.spill_var->inst_offset, TRUE, TRUE);
++			if (ins->inst_c0)
++				x86_sse_alu_pd_reg_membase (code, X86_SSE_MOVHPD_REG_MEMBASE, ins->dreg, ins->backend.spill_var->inst_basereg, ins->backend.spill_var->inst_offset);
++			else
++				x86_sse_alu_pd_reg_membase (code, X86_SSE_MOVSD_REG_MEMBASE, ins->dreg, ins->backend.spill_var->inst_basereg, ins->backend.spill_var->inst_offset);
++			break;
++
++		case OP_STOREX_MEMBASE_REG:
++		case OP_STOREX_MEMBASE:
++			x86_movups_membase_reg (code, ins->dreg, ins->inst_offset, ins->sreg1);
++			break;
++		case OP_LOADX_MEMBASE:
++			x86_movups_reg_membase (code, ins->dreg, ins->sreg1, ins->inst_offset);
++			break;
++		case OP_LOADX_ALIGNED_MEMBASE:
++			x86_movaps_reg_membase (code, ins->dreg, ins->sreg1, ins->inst_offset);
++			break;
++		case OP_STOREX_ALIGNED_MEMBASE_REG:
++			x86_movaps_membase_reg (code, ins->dreg, ins->inst_offset, ins->sreg1);
++			break;
++		case OP_STOREX_NTA_MEMBASE_REG:
++			x86_sse_alu_reg_membase (code, X86_SSE_MOVNTPS, ins->dreg, ins->sreg1, ins->inst_offset);
++			break;
++		case OP_PREFETCH_MEMBASE:
++			x86_sse_alu_reg_membase (code, X86_SSE_PREFETCH, ins->backend.arg_info, ins->sreg1, ins->inst_offset);
++
++			break;
++		case OP_XMOVE:
++			/*FIXME the peephole pass should have killed this*/
++			if (ins->dreg != ins->sreg1)
++				x86_movaps_reg_reg (code, ins->dreg, ins->sreg1);
++			break;		
++		case OP_XZERO:
++			x86_sse_alu_pd_reg_reg (code, X86_SSE_PXOR, ins->dreg, ins->dreg);
++			break;
++		case OP_ICONV_TO_R8_RAW:
++			x86_mov_membase_reg (code, ins->backend.spill_var->inst_basereg, ins->backend.spill_var->inst_offset, ins->sreg1, 4);
++			x86_fld_membase (code, ins->backend.spill_var->inst_basereg, ins->backend.spill_var->inst_offset, FALSE);
++			break;
++
++		case OP_FCONV_TO_R8_X:
++			x86_fst_membase (code, ins->backend.spill_var->inst_basereg, ins->backend.spill_var->inst_offset, TRUE, TRUE);
++			x86_movsd_reg_membase (code, ins->dreg, ins->backend.spill_var->inst_basereg, ins->backend.spill_var->inst_offset);
++			break;
++
++		case OP_XCONV_R8_TO_I4:
++			x86_cvttsd2si (code, ins->dreg, ins->sreg1);
++			switch (ins->backend.source_opcode) {
++			case OP_FCONV_TO_I1:
++				x86_widen_reg (code, ins->dreg, ins->dreg, TRUE, FALSE);
++				break;
++			case OP_FCONV_TO_U1:
++				x86_widen_reg (code, ins->dreg, ins->dreg, FALSE, FALSE);
++				break;
++			case OP_FCONV_TO_I2:
++				x86_widen_reg (code, ins->dreg, ins->dreg, TRUE, TRUE);
++				break;
++			case OP_FCONV_TO_U2:
++				x86_widen_reg (code, ins->dreg, ins->dreg, FALSE, TRUE);
++				break;
++			}			
++			break;
++
++		case OP_EXPAND_I1:
++			/*FIXME this causes a partial register stall, maybe it would not be that bad to use shift + mask + or*/
++			/*The +4 is to get a mov ?h, ?l over the same reg.*/
++			x86_mov_reg_reg (code, ins->dreg + 4, ins->dreg, 1);
++			x86_sse_alu_pd_reg_reg_imm (code, X86_SSE_PINSRW, ins->dreg, ins->sreg1, 0);
++			x86_sse_alu_pd_reg_reg_imm (code, X86_SSE_PINSRW, ins->dreg, ins->sreg1, 1);
++			x86_sse_shift_reg_imm (code, X86_SSE_PSHUFD, ins->dreg, ins->dreg, 0);
++			break;
++		case OP_EXPAND_I2:
++			x86_sse_alu_pd_reg_reg_imm (code, X86_SSE_PINSRW, ins->dreg, ins->sreg1, 0);
++			x86_sse_alu_pd_reg_reg_imm (code, X86_SSE_PINSRW, ins->dreg, ins->sreg1, 1);
++			x86_sse_shift_reg_imm (code, X86_SSE_PSHUFD, ins->dreg, ins->dreg, 0);
++			break;
++		case OP_EXPAND_I4:
++			x86_movd_xreg_reg (code, ins->dreg, ins->sreg1);
++			x86_sse_shift_reg_imm (code, X86_SSE_PSHUFD, ins->dreg, ins->dreg, 0);
++			break;
++		case OP_EXPAND_R4:
++			x86_fst_membase (code, ins->backend.spill_var->inst_basereg, ins->backend.spill_var->inst_offset, FALSE, TRUE);
++			x86_movd_xreg_membase (code, ins->dreg, ins->backend.spill_var->inst_basereg, ins->backend.spill_var->inst_offset);
++			x86_sse_shift_reg_imm (code, X86_SSE_PSHUFD, ins->dreg, ins->dreg, 0);
++			break;
++		case OP_EXPAND_R8:
++			x86_fst_membase (code, ins->backend.spill_var->inst_basereg, ins->backend.spill_var->inst_offset, TRUE, TRUE);
++			x86_movsd_reg_membase (code, ins->dreg, ins->backend.spill_var->inst_basereg, ins->backend.spill_var->inst_offset);
++			x86_sse_shift_reg_imm (code, X86_SSE_PSHUFD, ins->dreg, ins->dreg, 0x44);
++			break;
++#endif
++
+ 		default:
+ 			g_warning ("unknown opcode %s in %s()\n", mono_inst_name (ins->opcode), __FUNCTION__);
+ 			g_assert_not_reached ();

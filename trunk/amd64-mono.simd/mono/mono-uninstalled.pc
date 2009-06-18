@@ -1,0 +1,6 @@
+Name: Mono
+Description: Mono Runtime
+Version: 2.5
+Requires: glib-2.0 gthread-2.0
+Libs: -L/home/jmaine/mono_source/mono/mono/mini/.libs -Wl,--export-dynamic -lmono -lpthread -lrt  -ldl -lpthread -lm
+Cflags: -I/home/jmaine/mono_source/mono -I/home/jmaine/mono_source/mono/mono -D_REENTRANT
