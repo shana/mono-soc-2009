@@ -1,0 +1,3 @@
+coree.lo: coree.c ../../config.h
+
+../../config.h:
