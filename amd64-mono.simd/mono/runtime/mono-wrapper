@@ -1,0 +1,7 @@
+#! /bin/sh
+r='/home/jmaine/mono_source/mono'
+MONO_CFG_DIR='/home/jmaine/mono_source/mono/runtime/etc'
+PATH="$r/runtime/_tmpinst/bin:$PATH"
+MONO_SHARED_DIR=$r/runtime
+export MONO_CFG_DIR MONO_SHARED_DIR PATH
+exec "$r/libtool" --mode=execute "$r/mono/mini/mono" --config "/home/jmaine/mono_source/mono/runtime/etc/mono/config" "$@"
