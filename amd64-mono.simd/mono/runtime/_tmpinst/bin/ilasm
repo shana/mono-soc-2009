@@ -1,2 +1,0 @@
-#! /bin/sh
-exec "/home/jmaine/mono_source/mono/runtime/_tmpinst/bin/mono" "/home/jmaine/mono_source/mcs/ilasm/ilasm.exe" "$@"
