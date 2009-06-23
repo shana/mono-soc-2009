@@ -1,3 +1,0 @@
-sgen-gc.lo: sgen-gc.c ../../config.h
-
-../../config.h:
