@@ -711,6 +711,13 @@ typedef union {
 
 #define amd64_sse_psubb_reg_reg(inst, dreg, reg) emit_sse_reg_reg((inst), (dreg), (reg), 0x66, 0x0f, 0xf8)
 
+
+
+
+#define amd64_sse_movups_membase_reg(inst, membase, offset, reg) emit_sse_membase_reg_op2((inst), (basereg), (disp), (reg), 0x0f, 0x11)
+
+#define amd64_sse_movups_reg_membase(inst, dreg, basereg, disp) emit_sse_reg_membase_op2((inst), (dreg), (basereg), (disp), 0x0f, 0x10)
+
 /* Generated from x86-codegen.h */
 
 #define amd64_breakpoint_size(inst,size) do { x86_breakpoint(inst); } while (0)
