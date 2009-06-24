@@ -4943,10 +4943,10 @@ mono_arch_output_basic_block (MonoCompile *cfg, MonoBasicBlock *bb)
 
 		case OP_STOREX_MEMBASE_REG:
 		case OP_STOREX_MEMBASE:
-			x86_movups_membase_reg (code, ins->dreg, ins->inst_offset, ins->sreg1);
+			amd64_sse_movups_membase_reg (code, ins->dreg, ins->inst_offset, ins->sreg1);
 			break;
 		case OP_LOADX_MEMBASE:
-			x86_movups_reg_membase (code, ins->dreg, ins->sreg1, ins->inst_offset);
+			amd64_sse_movups_reg_membase (code, ins->dreg, ins->sreg1, ins->inst_offset);
 			break;
 		case OP_LOADX_ALIGNED_MEMBASE:
 			x86_movaps_reg_membase (code, ins->dreg, ins->sreg1, ins->inst_offset);
