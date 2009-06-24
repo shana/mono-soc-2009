@@ -911,7 +911,6 @@ mono_arch_cpu_optimizazions (guint32 *exclude_mask)
 				*exclude_mask |= MONO_OPT_FCMOV;
 		} else
 			*exclude_mask |= MONO_OPT_CMOV;
-
 	}
 
 	return opts;
